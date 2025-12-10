@@ -73,4 +73,8 @@ app.get("/admin/reportes",(req,res)=>{
   res.json(db.reportes);
 });
 
-app.listen(3000,()=>console.log("Listo en http://localhost:3000"));
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Servidor escuchando en puerto " + PORT);
+});
