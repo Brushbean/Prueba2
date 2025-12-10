@@ -1,80 +1,98 @@
+const express = require("express");
+const path = require("path");
 
-const express=require("express");
-const fs=require("fs");
-const path=require("path");
-const app=express();
-app.use(express.urlencoded({extended:true}));
+const app = express();
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
-let sesion={correo:null, admin:false};
+/* ====== BD en memoria (SE BORRA SOLO SI REINICIA RENDER) ====== */
+let usuarios = [];          // usuarios verificados
+let verificaciones = {};    // correos esperando verificación
+let reportes = [];          // reportes creados
+let sesion = { correo: null, admin: false };
 
-function leerDB(){
-  return JSON.parse(fs.readFileSync("./data/db.json","utf8"));
-}
-function guardarDB(db){
-  fs.writeFileSync("./data/db.json", JSON.stringify(db,null,2));
-}
+/* ====== RUTAS ====== */
 
-app.get("/",(req,res)=>{
-  res.sendFile(path.join(__dirname,"public/index.html"));
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public/index.html"));
 });
 
-app.post("/registrar",(req,res)=>{
-  const db=leerDB();
-  const {correo, clave}=req.body;
-  if(db.usuarios.find(u=>u.correo===correo)){
-    return res.send("Correo ya registrado <a href='/'>Volver</a>");
+/* Registro */
+app.post("/registrar", (req, res) => {
+  const { correo, clave } = req.body;
+
+  if (usuarios.find(u => u.correo === correo)) {
+    return res.send("Este correo ya está registrado. <a href='/'>Volver</a>");
   }
-  const codigo=Math.floor(100000+Math.random()*900000);
-  db.verificaciones[correo]= {clave, codigo};
-  guardarDB(db);
-  res.send("Tu código de verificación es: "+codigo+"<br><a href='/verificar.html'>Verificar</a>");
+
+  const codigo = Math.floor(100000 + Math.random() * 900000);
+  verificaciones[correo] = { clave, codigo };
+
+  res.send(`
+    Tu código de verificación es: <b>${codigo}</b><br>
+    <a href="/verificar.html">Verificar cuenta</a>
+  `);
 });
 
-app.post("/verificar",(req,res)=>{
-  const db=leerDB();
-  const {correo, codigo}=req.body;
-  const ver=db.verificaciones[correo];
-  if(!ver) return res.send("No existe registro. <a href='/'>Volver</a>");
-  if(ver.codigo===codigo){
-    db.usuarios.push({correo, clave:ver.clave});
-    delete db.verificaciones[correo];
-    guardarDB(db);
-    res.send("Cuenta verificada. <a href='/'>Iniciar sesión</a>");
-  } else res.send("Código incorrecto.");
+/* Verificación */
+app.post("/verificar", (req, res) => {
+  const { correo, codigo } = req.body;
+  const ver = verificaciones[correo];
+
+  if (!ver) {
+    return res.send("No existe un proceso de registro para este correo.");
+  }
+
+  if (String(ver.codigo) === String(codigo)) {
+    usuarios.push({ correo, clave: ver.clave });
+    delete verificaciones[correo];
+    return res.send("Cuenta verificada. <a href='/'>Iniciar sesión</a>");
+  }
+
+  res.send("Código incorrecto. <a href='/verificar.html'>Intentar otra vez</a>");
 });
 
-app.post("/login",(req,res)=>{
-  const db=leerDB();
-  const {correo, clave}=req.body;
-  if(correo==="admin@dgeti.mx" && clave==="admin123"){
-    sesion={correo, admin:true};
+/* Login */
+app.post("/login", (req, res) => {
+  const { correo, clave } = req.body;
+
+  // ADMIN
+  if (correo === "admin@dgeti.mx" && clave === "admin123") {
+    sesion = { correo, admin: true };
     return res.send("Bienvenido administrador <a href='/panel_admin.html'>Panel</a>");
   }
-  const ok=db.usuarios.find(u=>u.correo===correo && u.clave===clave);
-  if(ok){
-    sesion={correo, admin:false};
-    res.send("Sesión iniciada. <a href='/crear_reporte.html'>Crear reporte</a>");
-  } else res.send("Credenciales incorrectas.");
+
+  const ok = usuarios.find(u => u.correo === correo && u.clave === clave);
+
+  if (ok) {
+    sesion = { correo, admin: false };
+    return res.send("Sesión iniciada. <a href='/crear_reporte.html'>Crear reporte</a>");
+  }
+
+  res.send("Credenciales inválidas. <a href='/'>Volver</a>");
 });
 
-app.post("/crear_reporte",(req,res)=>{
-  if(!sesion.correo) return res.send("Debe iniciar sesión.");
-  const {titulo, descripcion}=req.body;
-  const db=leerDB();
-  db.reportes.push({titulo, descripcion, autor:sesion.correo});
-  guardarDB(db);
-  res.send("Reporte creado. <a href='/'>Inicio</a>");
+/* Crear reporte */
+app.post("/crear_reporte", (req, res) => {
+  if (!sesion.correo) {
+    return res.send("Debes iniciar sesión.");
+  }
+
+  const { titulo, descripcion } = req.body;
+  reportes.push({ titulo, descripcion, autor: sesion.correo });
+
+  res.send("Reporte creado. <a href='/'>Volver</a>");
 });
 
-app.get("/admin/reportes",(req,res)=>{
-  if(!sesion.admin) return res.send("Solo admin.");
-  const db=leerDB();
-  res.json(db.reportes);
+/* Panel admin */
+app.get("/admin/reportes", (req, res) => {
+  if (!sesion.admin) {
+    return res.send("Acceso solo para administradores.");
+  }
+
+  res.json(reportes);
 });
 
+/* PUERTO */
 const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log("Servidor escuchando en puerto " + PORT);
-});
+app.listen(PORT, () => console.log("Servidor listo en puerto " + PORT));
